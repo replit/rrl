@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coredns/rrl/plugins/rrl/cache"
+	"github.com/replit/rrl/plugins/rrl/cache"
 
 	"github.com/miekg/dns"
 
