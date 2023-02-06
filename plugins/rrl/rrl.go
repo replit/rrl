@@ -6,10 +6,12 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/coredns/coredns/plugin/metadata"
 	"github.com/replit/rrl/plugins/rrl/cache"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/miekg/dns"
 
@@ -34,6 +36,8 @@ type RRL struct {
 	errorsInterval    int64
 
 	requestsInterval int64
+
+	nodeCount int64
 
 	slipRatio uint
 
@@ -77,19 +81,23 @@ func responseType(m *dns.Msg) byte {
 
 // allowanceForRtype returns allowed response interval for the given rtype
 func (rrl *RRL) allowanceForRtype(rtype uint8) int64 {
+	var interval int64
 	switch rtype {
 	case rTypeResponse:
-		return rrl.responsesInterval
+		interval = rrl.responsesInterval
 	case rTypeNodata:
-		return rrl.nodataInterval
+		interval = rrl.nodataInterval
 	case rTypeNxdomain:
-		return rrl.nxdomainsInterval
+		interval = rrl.nxdomainsInterval
 	case rTypeReferral:
-		return rrl.referralsInterval
+		interval = rrl.referralsInterval
 	case rTypeError:
-		return rrl.errorsInterval
+		interval = rrl.errorsInterval
+	default:
+		return -1
 	}
-	return -1
+
+	return int64(float64(interval) / float64(rrl.getNodeCount()))
 }
 
 // initTable creates a new cache table and sets the cache eviction function
@@ -103,6 +111,18 @@ func (rrl *RRL) initTable() {
 		}
 		return time.Now().UnixNano()-ra.allowTime >= rrl.window
 	})
+}
+
+func (rrl *RRL) startNodeCountLoop() {
+	client := kubernetes.New()
+	for range time.Tick(10 * time.Second) {
+		shards := int64(1)
+		atomic.StoreInt64(&rrl.nodeCount, shards)
+	}
+}
+
+func (rrl *RRL) getNodeCount() int64 {
+	return atomic.LoadInt64(&rrl.nodeCount)
 }
 
 // responseToToken returns a token string for the response in writer

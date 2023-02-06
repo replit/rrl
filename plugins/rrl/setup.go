@@ -38,6 +38,7 @@ func defaultRRL() RRL {
 		ipv4PrefixLength: 24,
 		ipv6PrefixLength: 56,
 		maxTableSize:     100000,
+		nodeCount:        1,
 	}
 }
 
@@ -45,10 +46,11 @@ func rrlParse(c *caddy.Controller) (*RRL, error) {
 	rrl := defaultRRL()
 
 	var (
-		nodataIntervalSet    bool
-		nxdomainsIntervalSet bool
-		referralsIntervalSet bool
-		errorsIntervalSet    bool
+		nodataIntervalSet       bool
+		nxdomainsIntervalSet    bool
+		referralsIntervalSet    bool
+		errorsIntervalSet       bool
+		enableNodeCountScanning bool
 	)
 
 	for c.Next() {
@@ -168,6 +170,12 @@ func rrlParse(c *caddy.Controller) (*RRL, error) {
 						return nil, c.ArgErr()
 					}
 					rrl.reportOnly = true
+				case "dynamic-node-count":
+					args := c.RemainingArgs()
+					if len(args) > 0 {
+						return nil, c.ArgErr()
+					}
+					enableNodeCountScanning = true
 				default:
 					if c.Val() != "}" {
 						return nil, c.Errf("unknown property '%s'", c.Val())
@@ -196,6 +204,10 @@ func rrlParse(c *caddy.Controller) (*RRL, error) {
 
 		// initialize table
 		rrl.initTable()
+
+		if enableNodeCountScanning {
+			go rrl.startNodeCountLoop()
+		}
 
 		return &rrl, nil
 	}

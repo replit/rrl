@@ -7,6 +7,7 @@ require (
 	github.com/coredns/coredns v1.8.6
 	github.com/miekg/dns v1.1.43
 	github.com/prometheus/client_golang v1.11.0
+	k8s.io/client-go v0.26.1 // indirect
 )
 
 replace github.com/DataDog/dd-trace-go v0.6.1 => github.com/datadog/dd-trace-go v0.6.1
