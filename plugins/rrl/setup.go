@@ -1,6 +1,7 @@
 package rrl
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/coredns/caddy"
@@ -38,6 +39,7 @@ func defaultRRL() RRL {
 		ipv4PrefixLength: 24,
 		ipv6PrefixLength: 56,
 		maxTableSize:     100000,
+		podCount:         1,
 	}
 }
 
@@ -45,10 +47,12 @@ func rrlParse(c *caddy.Controller) (*RRL, error) {
 	rrl := defaultRRL()
 
 	var (
-		nodataIntervalSet    bool
-		nxdomainsIntervalSet bool
-		referralsIntervalSet bool
-		errorsIntervalSet    bool
+		nodataIntervalSet       bool
+		nxdomainsIntervalSet    bool
+		referralsIntervalSet    bool
+		errorsIntervalSet       bool
+		scanKubernetesApp       string
+		scanKubernetesNamespace string
 	)
 
 	for c.Next() {
@@ -168,6 +172,13 @@ func rrlParse(c *caddy.Controller) (*RRL, error) {
 						return nil, c.ArgErr()
 					}
 					rrl.reportOnly = true
+				case "node-count-from-kubernetes-app":
+					args := c.RemainingArgs()
+					if len(args) != 2 {
+						return nil, c.ArgErr()
+					}
+					scanKubernetesNamespace = args[0]
+					scanKubernetesApp = args[1]
 				default:
 					if c.Val() != "}" {
 						return nil, c.Errf("unknown property '%s'", c.Val())
@@ -196,6 +207,15 @@ func rrlParse(c *caddy.Controller) (*RRL, error) {
 
 		// initialize table
 		rrl.initTable()
+
+		if scanKubernetesApp != "" && scanKubernetesNamespace != "" {
+			client, err := NewKubernetesClient(scanKubernetesNamespace, scanKubernetesApp)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
+			}
+
+			go rrl.scanKubernetesPods(client)
+		}
 
 		return &rrl, nil
 	}
