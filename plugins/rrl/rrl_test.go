@@ -216,3 +216,40 @@ func TestAddrPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestPodCount(t *testing.T) {
+	responseRPS := int64(10)
+	nxdomainsRPS := int64(100)
+
+	rrl := defaultRRL()
+	rrl.window = 5 * second
+	rrl.responsesInterval = second / (responseRPS * 2)
+	rrl.nxdomainsInterval = second / (nxdomainsRPS * 2)
+	rrl.podCount = 2
+	rrl.table = cache.New(rrl.maxTableSize)
+
+	_, _, err := rrl.debit(rrl.allowanceForRtype(rTypeResponse), "token1")
+	if err != nil {
+		t.Errorf("got error: %v", err)
+	}
+	ra, _ := rrl.table.Get("token1")
+	bal := time.Now().UnixNano() - ra.(*ResponseAccount).allowTime
+	if bal < second-(second/responseRPS) {
+		t.Errorf("expected balance not less than %v, got %v", second-rrl.responsesInterval, bal)
+	}
+
+	bal, _, err = rrl.debit(rrl.allowanceForRtype(rTypeResponse), "token1")
+	if bal > second-(second/responseRPS) {
+		t.Errorf("expected balance of < %v, got %v", second-rrl.responsesInterval, bal)
+	}
+
+	_, _, err = rrl.debit(rrl.allowanceForRtype(rTypeNxdomain), "token2")
+	if err != nil {
+		t.Errorf("got error: %v", err)
+	}
+	time.Sleep(time.Second) // sleep 1 second, balance should max out
+	bal, _, err = rrl.debit(rrl.allowanceForRtype(rTypeNxdomain), "token2")
+	if bal != second-(second/nxdomainsRPS) {
+		t.Errorf("expected balance of %v, got %v", rrl.window-rrl.nxdomainsInterval, bal)
+	}
+}

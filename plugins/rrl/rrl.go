@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/coredns/coredns/plugin/metadata"
@@ -34,6 +35,8 @@ type RRL struct {
 	errorsInterval    int64
 
 	requestsInterval int64
+
+	podCount int64
 
 	slipRatio uint
 
@@ -77,19 +80,43 @@ func responseType(m *dns.Msg) byte {
 
 // allowanceForRtype returns allowed response interval for the given rtype
 func (rrl *RRL) allowanceForRtype(rtype uint8) int64 {
+	var allowance int64
 	switch rtype {
 	case rTypeResponse:
-		return rrl.responsesInterval
+		allowance = rrl.responsesInterval
 	case rTypeNodata:
-		return rrl.nodataInterval
+		allowance = rrl.nodataInterval
 	case rTypeNxdomain:
-		return rrl.nxdomainsInterval
+		allowance = rrl.nxdomainsInterval
 	case rTypeReferral:
-		return rrl.referralsInterval
+		allowance = rrl.referralsInterval
 	case rTypeError:
-		return rrl.errorsInterval
+		allowance = rrl.errorsInterval
+	default:
+		return -1
 	}
-	return -1
+
+	// We multiply because allowance is (1s / RPS)
+	return allowance * atomic.LoadInt64(&rrl.podCount)
+}
+
+// scanKubernetesPods periodically determines the number of pods running in kubernetes
+// which will then be used to adjust the ratelimits so the overall ratelimit is divided
+// by the total number of pods.
+func (rrl *RRL) scanKubernetesPods(client PodCounter) {
+	ctx := context.Background()
+	for range time.Tick(10 * time.Second) {
+		count, err := client.PodCount(ctx)
+		if err != nil {
+			log.Errorf("failed to scan kubernetes pods: %v", err)
+			continue
+		}
+		// Ensure we don't ever fall below 0 healthy pods and disable limiting.
+		if count < 1 {
+			count = 1
+		}
+		atomic.StoreInt64(&rrl.podCount, count)
+	}
 }
 
 // initTable creates a new cache table and sets the cache eviction function

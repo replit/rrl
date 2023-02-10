@@ -3,6 +3,7 @@ package rrl
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 
 	"github.com/miekg/dns"
 
@@ -26,11 +27,14 @@ func (rrl *RRL) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) 
 
 	// Limit request rate
 	if rrl.requestsInterval != 0 {
+		// We multiply because allowance is (1s / RPS)
+		requestsInterval := rrl.requestsInterval * atomic.LoadInt64(&rrl.podCount)
+
 		t := rrl.addrPrefix(state.RemoteAddr())
-		b, _, err := rrl.debit(rrl.requestsInterval, t) // ignore slip when request limit is exceeded (there is no response to slip)
+		b, _, err := rrl.debit(requestsInterval, t) // ignore slip when request limit is exceeded (there is no response to slip)
 		// if the balance is negative, drop the request (don't write response to client)
 		if b < 0 && err == nil {
-			log.Debugf("request rate exceeded from %v (token='%v', balance=%.1f)", state.IP(), t, float64(b)/float64(rrl.requestsInterval))
+			log.Debugf("request rate exceeded from %v (token='%v', balance=%.1f)", state.IP(), t, float64(b)/float64(requestsInterval))
 			RequestsExceeded.WithLabelValues(state.IP()).Add(1)
 			// always return success, to prevent writing of error statuses to client
 			if !rrl.reportOnly {
